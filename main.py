@@ -65,14 +65,14 @@ def signup(payload: SignupRequest):
     if not payload.username or not payload.password:
         raise HTTPException(status_code=400, detail="Username and password required")
 
-    # Ensure unique username/phone/email
-    existing = db["user"].find_one({
-        "$or": [
-            {"username": payload.username},
-            {"phone": payload.phone} if payload.phone else {},
-            {"email": payload.email} if payload.email else {}
-        ]
-    })
+    # Ensure unique username/phone/email - only include provided fields
+    or_conditions = [{"username": payload.username}]
+    if payload.phone:
+        or_conditions.append({"phone": payload.phone})
+    if payload.email:
+        or_conditions.append({"email": payload.email})
+
+    existing = db["user"].find_one({"$or": or_conditions})
     if existing:
         raise HTTPException(status_code=409, detail="Account already exists")
 

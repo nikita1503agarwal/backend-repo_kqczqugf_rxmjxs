@@ -1,10 +1,10 @@
 import os
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 from bson import ObjectId
-from passlib.hash import bcrypt
+import bcrypt as bc
 
 from database import db, create_document, get_documents
 from schemas import User, Product, Category, Order, OrderItem
@@ -45,6 +45,18 @@ def to_str_id(doc):
         d["id"] = str(d.pop("_id"))
     return d
 
+# ---------- Password Utilities ----------
+
+def hash_password(password: str) -> str:
+    return bc.hashpw(password.encode("utf-8"), bc.gensalt()).decode("utf-8")
+
+
+def verify_password(password: str, password_hash: str) -> bool:
+    try:
+        return bc.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+    except Exception:
+        return False
+
 # ---------- Auth Endpoints ----------
 @app.post("/auth/signup")
 def signup(payload: SignupRequest):
@@ -64,7 +76,7 @@ def signup(payload: SignupRequest):
     if existing:
         raise HTTPException(status_code=409, detail="Account already exists")
 
-    password_hash = bcrypt.hash(payload.password)
+    password_hash = hash_password(payload.password)
     user_doc = User(
         username=payload.username,
         email=payload.email,
@@ -93,7 +105,7 @@ def login(payload: LoginRequest):
         raise HTTPException(status_code=400, detail="Provide username or phone")
 
     user = db["user"].find_one(query)
-    if not user or not bcrypt.verify(payload.password, user.get("password_hash", "")):
+    if not user or not verify_password(payload.password, user.get("password_hash", "")):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     return {"id": str(user["_id"]), "username": user.get("username"), "name": user.get("name")}
@@ -101,7 +113,7 @@ def login(payload: LoginRequest):
 # ---------- Catalog Endpoints ----------
 @app.get("/categories")
 def list_categories():
-    cats = list(db["category"].find()) if db else []
+    cats = list(db["category"].find()) if db is not None else []
     return [to_str_id(c) for c in cats]
 
 class CreateCategory(BaseModel):
@@ -139,7 +151,7 @@ def get_product(product_id: str):
         oid = ObjectId(product_id)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid id")
-    prod = db["product"].find_one({"_id": oid}) if db else None
+    prod = db["product"].find_one({"_id": oid}) if db is not None else None
     if not prod:
         raise HTTPException(status_code=404, detail="Not found")
     return to_str_id(prod)
@@ -211,7 +223,8 @@ def seed():
 
     # Create a demo user if none
     if not db["user"].find_one({"username": "demo"}):
-        db["user"].insert_one(User(username="demo", email="demo@example.com", phone=None, password_hash=bcrypt.hash("demo123"), name="Demo User").model_dump())
+        demo_hash = hash_password("demo123")
+        db["user"].insert_one(User(username="demo", email="demo@example.com", phone=None, password_hash=demo_hash, name="Demo User").model_dump())
 
     return {"status": "seeded"}
 
